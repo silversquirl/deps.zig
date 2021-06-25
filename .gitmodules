@@ -1,0 +1,3 @@
+[submodule "example/deps/uuid"]
+	path = example/deps/uuid
+	url = https://github.com/vktec/zig-uuid
