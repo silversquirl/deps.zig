@@ -34,3 +34,10 @@ deps.addTo(exe);
 - *nix: `$XDG_CACHE_HOME/deps-zig/` (or `~/.cache/deps-zig/` if `XDG_CACHE_HOME` is unset)
 - Windows: `%LOCALAPPDATA%\Temp\deps-zig\`
 - macOS: `~/Library/Caches/deps-zig/`
+
+## Package names
+
+The name of a package is determined by the last path component in its git URL.
+Any prefix of `zig-`, or suffix of `-zig` or `.zig`, will be stripped, along with any `.git` suffix.
+
+For example, for the URL `https://github.com/vktec/zig-uuid.git`, the name `uuid` will be used.
