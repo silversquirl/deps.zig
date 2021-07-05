@@ -102,8 +102,11 @@ fn createPkg(self: Deps, name: []const u8, dep: Dep) std.build.Pkg {
 }
 
 pub fn add(self: *Deps, url: []const u8, version: []const u8) void {
-    const url_base = std.fs.path.basenamePosix(url);
-    const name = trimPrefix(u8, trimSuffix(u8, url_base, ".git"), "zig-");
+    const name = trimEnds(
+        std.fs.path.basenamePosix(url),
+        &.{"zig-"},
+        &.{ ".git", ".zig", "-zig" },
+    );
     const path = self.fetchPkg(name, url, version);
 
     const main_file = blk: {
@@ -301,19 +304,20 @@ fn isPkg(name: []const u8) bool {
     return true;
 }
 
-fn trimPrefix(comptime T: type, haystack: []const T, needle: []const T) []const T {
-    if (std.mem.startsWith(T, haystack, needle)) {
-        return haystack[needle.len..];
-    } else {
-        return haystack;
+/// Remove each prefix, then each suffix, in order
+fn trimEnds(haystack: []const u8, prefixes: []const []const u8, suffixes: []const []const u8) []const u8 {
+    var s = haystack;
+    for (prefixes) |prefix| {
+        if (std.mem.startsWith(u8, s, prefix)) {
+            s = s[prefix.len..];
+        }
     }
-}
-fn trimSuffix(comptime T: type, haystack: []const T, needle: []const T) []const T {
-    if (std.mem.endsWith(T, haystack, needle)) {
-        return haystack[0 .. haystack.len - needle.len];
-    } else {
-        return haystack;
+    for (suffixes) |suffix| {
+        if (std.mem.endsWith(u8, s, suffix)) {
+            s = s[0 .. s.len - suffix.len];
+        }
     }
+    return s;
 }
 
 fn exec(self: Deps, argv: []const []const u8, cwd: ?[]const u8) void {
