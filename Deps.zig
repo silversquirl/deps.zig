@@ -33,8 +33,8 @@ import_set: std.StringArrayHashMapUnmanaged(void) = .{},
 const Deps = @This();
 pub const Dep = struct {
     url: []const u8, // Git URL for the package
-    path: []const u8, // Path to the package directory
-    main_path: []const u8, // Absolute path to package main file
+    path: []const u8, // Path to package directory
+    main_path: []const u8, // Path to package main file
     deps: []const []const u8, // Dependencies of this package
 };
 
@@ -46,17 +46,17 @@ pub fn init(b: *std.build.Builder) *Deps {
     return self;
 }
 pub fn initNoStep(b: *std.build.Builder) *Deps {
-    const dir = switch (std.builtin.os.tag) {
-        .windows => b.fmt("{s}\\Temp\\deps-zig\\", .{std.os.getenv("LOCALAPPDATA").?}),
-        .macos => b.fmt("{s}/Library/Caches/deps-zig/", .{std.os.getenv("HOME").?}),
+    const dir = std.os.getenv("DEPS_ZIG_CACHE") orelse switch (std.builtin.os.tag) {
+        .windows => b.fmt("{s}\\Temp\\deps-zig", .{std.os.getenv("LOCALAPPDATA").?}),
+        .macos => b.fmt("{s}/Library/Caches/deps-zig", .{std.os.getenv("HOME").?}),
         else => if (std.os.getenv("XDG_CACHE_HOME")) |cache|
-            b.fmt("{s}/deps-zig/", .{cache})
+            b.fmt("{s}/deps-zig", .{cache})
         else
-            b.fmt("{s}/.cache/deps-zig/", .{std.os.getenv("HOME").?}),
+            b.fmt("{s}/.cache/deps-zig", .{std.os.getenv("HOME").?}),
     };
 
-    std.fs.makeDirAbsolute(dir) catch {};
-    var dirh = std.fs.openDirAbsolute(dir, .{}) catch |err| {
+    std.fs.cwd().makeDir(dir) catch {};
+    var dirh = std.fs.cwd().openDir(dir, .{}) catch |err| {
         std.debug.print("Could not open packages dir '{}': {s}\n", .{ std.fmt.fmtSliceEscapeLower(dir), @errorName(err) });
         std.os.exit(1);
     };
@@ -150,13 +150,16 @@ pub fn add(self: *Deps, url: []const u8, version: []const u8) void {
 }
 
 fn fetchPkg(self: Deps, name: []const u8, url: []const u8, version: []const u8) []const u8 {
-    const path = self.b.allocator.alloc(u8, self.dir.len + url.len + 1 + version.len) catch unreachable;
+    const path = self.b.allocator.alloc(u8, self.dir.len + 1 + url.len + 1 + version.len) catch unreachable;
 
-    // Base dir (includes path sep)
+    // Base dir
     var i: usize = 0;
-    std.debug.assert(self.dir[self.dir.len - 1] == std.fs.path.sep);
     std.mem.copy(u8, path[i..], self.dir);
     i += self.dir.len;
+
+    // Path separator
+    path[i] = std.fs.path.sep;
+    i += 1;
 
     // Encoded URL (/ replaced with : so it's a valid path)
     std.mem.copy(u8, path[i..], url);

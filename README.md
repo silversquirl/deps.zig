@@ -12,11 +12,8 @@ compatible implementations as you see fit.
 ## Usage
 
 Deps.zig is a standalone Zig file that is designed to be copied into your project.
-It will install packages into a system-specific directory:
-
-- *nix: `$XDG_CACHE_HOME/deps-zig/`
-- Windows: `%LOCALAPPDATA%\Temp\deps-zig\`
-- macOS: `~/Library/Caches/deps-zig/`
+It will install packages into a system-specific directory, as listed below.
+You can override this location by setting the `DEPS_ZIG_CACHE` environment variable.
 
 To use Deps.zig in your `build.zig`, simply add code like the following, or look in the `example`
 directory in this repo for a more complete example.
@@ -31,3 +28,9 @@ deps.add("https://github.com/vktec/zig-uuid", "main");
 // Add all registered packages to the executable step
 deps.addTo(exe);
 ```
+
+### Default cache directory
+
+- *nix: `$XDG_CACHE_HOME/deps-zig/` (or `~/.cache/deps-zig/` if `XDG_CACHE_HOME` is unset)
+- Windows: `%LOCALAPPDATA%\Temp\deps-zig\`
+- macOS: `~/Library/Caches/deps-zig/`
