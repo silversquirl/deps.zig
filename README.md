@@ -21,6 +21,8 @@ It will install packages into a system-specific directory:
 To use Deps.zig in your `build.zig`, simply add code like the following, or look in the `example`
 directory in this repo for a more complete example.
 
+To update all dependencies, run `zig build update`.
+
 ```zig
 // Create a new dependency list
 var deps = @import("Deps.zig").init(b);

@@ -23,18 +23,29 @@
 
 const std = @import("std");
 
+update_step: std.build.Step,
+
 b: *std.build.Builder,
-deps: std.StringArrayHashMapUnmanaged(Dep) = .{},
 dir: []const u8,
+deps: std.StringArrayHashMapUnmanaged(Dep) = .{},
 import_set: std.StringArrayHashMapUnmanaged(void) = .{},
 
 const Deps = @This();
 pub const Dep = struct {
-    path: []const u8, // Absolute path to package main file
+    url: []const u8, // Git URL for the package
+    path: []const u8, // Path to the package directory
+    main_path: []const u8, // Absolute path to package main file
     deps: []const []const u8, // Dependencies of this package
 };
 
-pub fn init(b: *std.build.Builder) Deps {
+pub fn init(b: *std.build.Builder) *Deps {
+    const self = initNoStep(b);
+    const step = b.step("update", "Update all dependencies to the latest allowed version");
+    step.dependOn(&self.update_step);
+
+    return self;
+}
+pub fn initNoStep(b: *std.build.Builder) *Deps {
     const dir = switch (std.builtin.os.tag) {
         .windows => b.fmt("{s}\\Temp\\deps-zig\\", .{std.os.getenv("LOCALAPPDATA").?}),
         .macos => b.fmt("{s}/Library/Caches/deps-zig/", .{std.os.getenv("HOME").?}),
@@ -56,7 +67,13 @@ pub fn init(b: *std.build.Builder) Deps {
         std.os.exit(1);
     };
 
-    return .{ .b = b, .dir = dir };
+    const self = b.allocator.create(Deps) catch unreachable;
+    self.* = .{
+        .update_step = std.build.Step.init(.custom, "update-deps", b.allocator, makeUpdate),
+        .b = b,
+        .dir = dir,
+    };
+    return self;
 }
 
 pub fn addTo(self: Deps, step: *std.build.LibExeObjStep) void {
@@ -68,7 +85,7 @@ pub fn addTo(self: Deps, step: *std.build.LibExeObjStep) void {
 fn createPkg(self: Deps, name: []const u8, dep: Dep) std.build.Pkg {
     return .{
         .name = name,
-        .path = .{ .path = dep.path },
+        .path = .{ .path = dep.main_path },
         .dependencies = if (dep.deps.len == 0) null else blk: {
             const deps = self.b.allocator.alloc(std.build.Pkg, dep.deps.len) catch unreachable;
             var i: usize = 0;
@@ -120,7 +137,13 @@ pub fn add(self: *Deps, url: []const u8, version: []const u8) void {
         },
     };
 
-    if (self.deps.fetchPut(self.b.allocator, name, .{ .path = main_path, .deps = deps }) catch unreachable) |_| {
+    const dep = Dep{
+        .url = url,
+        .path = path,
+        .main_path = main_path,
+        .deps = deps,
+    };
+    if (self.deps.fetchPut(self.b.allocator, name, dep) catch unreachable) |_| {
         std.debug.print("Duplicate dependency '{s}'\n", .{std.fmt.fmtSliceEscapeLower(name)});
         std.os.exit(1);
     }
@@ -150,41 +173,7 @@ fn fetchPkg(self: Deps, name: []const u8, url: []const u8, version: []const u8) 
     std.debug.assert(i == path.len);
 
     // If we don't have the dep already, clone it
-    std.fs.cwd().access(path, .{}) catch {
-        self.exec(&.{
-            "git",
-            "clone",
-            "--depth=1",
-            "--no-single-branch",
-            "--shallow-submodules",
-            "--",
-            url,
-            path,
-        }, null);
-    };
-
-    self.exec(&.{ "git", "fetch", "--all", "-Ppqt" }, path);
-    // Check if there are changes - we don't want to clobber them
-    if (self.execOk(&.{ "git", "diff", "--quiet", "HEAD" }, path)) {
-        // Clean; check if version is a branch
-        if (self.execOk(&.{
-            "git",
-            "show-ref",
-            "--verify",
-            "--",
-            self.b.fmt("refs/heads/{s}", .{version}),
-        }, path)) {
-            // It is, so switch to it and pull
-            self.exec(&.{ "git", "switch", "-q", "--", version }, path);
-            self.exec(&.{ "git", "pull", "-q", "--ff-only" }, path);
-        } else {
-            // It isn't, check out detached
-            self.exec(&.{ "git", "switch", "-dq", "--", version }, path);
-        }
-    } else {
-        // Dirty; print a warning
-        std.debug.print("WARNING: package {s} contains uncommitted changes, not attempting to update\n", .{name});
-    }
+    std.fs.cwd().access(path, .{}) catch self.updateDep(name, path, url, version);
 
     return path;
 }
@@ -255,6 +244,52 @@ const CollectImportsError =
     std.fs.File.SeekError ||
     std.mem.Allocator.Error ||
     error{InvalidSyntax};
+
+fn makeUpdate(step: *std.build.Step) !void {
+    const self = @fieldParentPtr(Deps, "update_step", step);
+    var it = self.deps.iterator();
+    while (it.next()) |entry| {
+        const dep = entry.value_ptr;
+        const version_idx = 1 + std.mem.lastIndexOfScalar(u8, dep.path, '@').?;
+        const version = dep.path[version_idx..];
+        self.updateDep(entry.key_ptr.*, dep.path, dep.url, version);
+    }
+}
+fn updateDep(self: Deps, name: []const u8, path: []const u8, url: []const u8, version: []const u8) void {
+    std.fs.cwd().access(path, .{}) catch self.exec(&.{
+        "git",
+        "clone",
+        "--depth=1",
+        "--no-single-branch",
+        "--shallow-submodules",
+        "--",
+        url,
+        path,
+    }, null);
+
+    self.exec(&.{ "git", "fetch", "--all", "-Ppqt" }, path);
+    // Check if there are changes - we don't want to clobber them
+    if (self.execOk(&.{ "git", "diff", "--quiet", "HEAD" }, path)) {
+        // Clean; check if version is a branch
+        if (self.execOk(&.{
+            "git",
+            "show-ref",
+            "--verify",
+            "--",
+            self.b.fmt("refs/heads/{s}", .{version}),
+        }, path)) {
+            // It is, so switch to it and pull
+            self.exec(&.{ "git", "switch", "-q", "--", version }, path);
+            self.exec(&.{ "git", "pull", "-q", "--ff-only" }, path);
+        } else {
+            // It isn't, check out detached
+            self.exec(&.{ "git", "switch", "-dq", "--", version }, path);
+        }
+    } else {
+        // Dirty; print a warning
+        std.debug.print("WARNING: package {s} contains uncommitted changes, not attempting to update\n", .{name});
+    }
+}
 
 fn isPkg(name: []const u8) bool {
     if (std.mem.endsWith(u8, name, ".zig")) return false;
