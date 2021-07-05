@@ -196,7 +196,7 @@ fn parsePackageDeps(self: *Deps, main_file: []const u8) ![]const []const u8 {
     return pkgs;
 }
 fn collectImports(self: *Deps, dir: std.fs.Dir, import: []const u8) CollectImportsError!usize {
-    const data = dir.readFileAlloc(self.b.allocator, import, 4 << 30) catch |err| switch (err) {
+    const data = dir.readFileAllocOptions(self.b.allocator, import, 4 << 30, null, 1, 0) catch |err| switch (err) {
         error.FileTooBig => {
             // If you have a 4GiB source file, you have a problem
             // However, we probably shouldn't outright error in this situation, so instead we'll warn and skip this file

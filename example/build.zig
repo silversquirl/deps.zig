@@ -4,7 +4,7 @@ pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
-    var deps = @import("Deps.zig").init(b);
+    const deps = @import("Deps.zig").init(b);
     deps.add("https://github.com/vktec/zig-uuid", "main");
 
     const exe = b.addExecutable("example", "src/main.zig");
