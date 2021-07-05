@@ -22,6 +22,8 @@
 
 // Possible TODOs:
 // - Parse source to ensure all dependencies are actually used
+// - Allow multiple packages in one repo
+// - Fetch packages at build time
 
 const std = @import("std");
 
