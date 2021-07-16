@@ -35,11 +35,21 @@ deps: std.StringArrayHashMapUnmanaged(Dep) = .{},
 import_set: std.StringArrayHashMapUnmanaged(void) = .{},
 
 const Deps = @This();
-pub const Dep = struct {
-    url: []const u8, // Git URL for the package
-    path: []const u8, // Path to package directory
-    main_path: []const u8, // Path to package main file
-    deps: []const []const u8, // Dependencies of this package
+pub const Dep = union(enum) {
+    managed: struct { // Fully managed dependency - we download these
+        url: []const u8, // Git URL for the package
+        path: []const u8, // Path to package directory
+        main_path: []const u8, // Path to package main file
+        deps: []const []const u8, // Dependency names of this package
+    },
+    tracked: struct { // Partially managed - we add dependencies to these
+        main_path: []const u8, // Path to package main file
+        deps: []const []const u8, // Dependency names of this package
+    },
+    unmanaged: struct { // Unmanaged - we just allow these as deps of other deps
+        main_path: std.build.FileSource, // Path to package main file
+        deps: ?[]const std.build.Pkg, // Dependencies of this package
+    },
 };
 
 pub fn init(b: *std.build.Builder) *Deps {
@@ -86,23 +96,37 @@ pub fn addTo(self: Deps, step: *std.build.LibExeObjStep) void {
         step.addPackage(self.createPkg(entry.key_ptr.*, entry.value_ptr.*));
     }
 }
-fn createPkg(self: Deps, name: []const u8, dep: Dep) std.build.Pkg {
-    return .{
-        .name = name,
-        .path = .{ .path = dep.main_path },
-        .dependencies = if (dep.deps.len == 0) null else blk: {
-            const deps = self.b.allocator.alloc(std.build.Pkg, dep.deps.len) catch unreachable;
-            var i: usize = 0;
-            for (dep.deps) |dname| {
-                if (self.deps.get(dname)) |ddep| {
-                    deps[i] = self.createPkg(dname, ddep);
-                    i += 1;
-                }
-                // If we don't have the dep, ignore it and let the compiler error
-            }
-            break :blk deps[0..i];
+fn createPkg(self: Deps, name: []const u8, dependency: Dep) std.build.Pkg {
+    return switch (dependency) {
+        .managed => |dep| .{
+            .name = name,
+            .path = .{ .path = dep.main_path },
+            .dependencies = self.createPkgDeps(dep.deps),
+        },
+        .tracked => |dep| .{
+            .name = name,
+            .path = .{ .path = dep.main_path },
+            .dependencies = self.createPkgDeps(dep.deps),
+        },
+        .unmanaged => |dep| .{
+            .name = name,
+            .path = dep.main_path,
+            .dependencies = dep.deps,
         },
     };
+}
+fn createPkgDeps(self: Deps, dep_names: []const []const u8) ?[]const std.build.Pkg {
+    if (dep_names.len == 0) return null;
+    const deps = self.b.allocator.alloc(std.build.Pkg, dep_names.len) catch unreachable;
+    var i: usize = 0;
+    for (dep_names) |dname| {
+        if (self.deps.get(dname)) |ddep| {
+            deps[i] = self.createPkg(dname, ddep);
+            i += 1;
+        }
+        // If we don't have the dep, ignore it and let the compiler error
+    }
+    return deps[0..i];
 }
 
 pub fn add(self: *Deps, url: []const u8, version: []const u8) void {
@@ -144,14 +168,44 @@ pub fn add(self: *Deps, url: []const u8, version: []const u8) void {
         },
     };
 
-    const dep = Dep{
+    const dep = Dep{ .managed = .{
         .url = url,
         .path = path,
         .main_path = main_path,
         .deps = deps,
-    };
+    } };
     if (self.deps.fetchPut(self.b.allocator, name, dep) catch unreachable) |_| {
         std.debug.print("Duplicate dependency '{s}'\n", .{std.fmt.fmtSliceEscapeLower(name)});
+        std.os.exit(1);
+    }
+}
+
+pub fn addPackagePath(self: *Deps, name: []const u8, main_path: []const u8) void {
+    const deps = self.parsePackageDeps(main_path) catch |err| switch (err) {
+        error.InvalidSyntax => &[_][]const u8{},
+        else => {
+            std.debug.print("Failed to parse package dependencies for {s}: {s}\n", .{ name, @errorName(err) });
+            std.os.exit(1);
+        },
+    };
+
+    const dep = Dep{ .tracked = .{
+        .main_path = main_path,
+        .deps = deps,
+    } };
+    if (self.deps.fetchPut(self.b.allocator, name, dep) catch unreachable) |_| {
+        std.debug.print("Duplicate dependency '{s}'\n", .{std.fmt.fmtSliceEscapeLower(name)});
+        std.os.exit(1);
+    }
+}
+
+pub fn addPackage(self: *Deps, package: std.build.Pkg) void {
+    const dep = Dep{ .unmanaged = .{
+        .main_path = package.path,
+        .deps = package.dependencies,
+    } };
+    if (self.deps.fetchPut(self.b.allocator, package.name, dep) catch unreachable) |_| {
+        std.debug.print("Duplicate dependency '{s}'\n", .{std.fmt.fmtSliceEscapeLower(package.name)});
         std.os.exit(1);
     }
 }
@@ -259,10 +313,14 @@ fn makeUpdate(step: *std.build.Step) !void {
     const self = @fieldParentPtr(Deps, "update_step", step);
     var it = self.deps.iterator();
     while (it.next()) |entry| {
-        const dep = entry.value_ptr;
-        const version_idx = 1 + std.mem.lastIndexOfScalar(u8, dep.path, '@').?;
-        const version = dep.path[version_idx..];
-        self.updateDep(entry.key_ptr.*, dep.path, dep.url, version);
+        switch (entry.value_ptr.*) {
+            .managed => |dep| {
+                const version_idx = 1 + std.mem.lastIndexOfScalar(u8, dep.path, '@').?;
+                const version = dep.path[version_idx..];
+                self.updateDep(entry.key_ptr.*, dep.path, dep.url, version);
+            },
+            else => {},
+        }
     }
 }
 fn updateDep(self: Deps, name: []const u8, path: []const u8, url: []const u8, version: []const u8) void {
