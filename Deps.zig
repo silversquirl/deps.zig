@@ -344,7 +344,7 @@ fn updateDep(self: Deps, name: []const u8, path: []const u8, url: []const u8, ve
             "show-ref",
             "--verify",
             "--",
-            self.b.fmt("refs/heads/{s}", .{version}),
+            self.b.fmt("refs/remotes/origin/{s}", .{version}),
         }, path)) {
             // It is, so switch to it and pull
             self.exec(&.{ "git", "switch", "-q", "--", version }, path);
