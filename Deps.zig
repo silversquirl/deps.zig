@@ -1,6 +1,6 @@
-// This file originates from https://github.com/vktec/deps.zig
+// This file originates from https://github.com/silversquirl/deps.zig
 //
-// Copyright (c) 2021 vktec
+// Copyright (c) 2021 silversquirl
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal

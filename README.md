@@ -24,7 +24,7 @@ To update all dependencies, run `zig build update`.
 // Create a new dependency list
 var deps = @import("Deps.zig").init(b);
 // Add a package, with a "version" of `main`, meaning it will use the latest commit on the `main` branch
-deps.add("https://github.com/vktec/zig-uuid", "main");
+deps.add("https://github.com/silversquirl/zig-uuid", "main");
 // Add all registered packages to the executable step
 deps.addTo(exe);
 ```
@@ -40,4 +40,4 @@ deps.addTo(exe);
 The name of a package is determined by the last path component in its git URL.
 Any prefix of `zig-`, or suffix of `-zig` or `.zig`, will be stripped, along with any `.git` suffix.
 
-For example, for the URL `https://github.com/vktec/zig-uuid.git`, the name `uuid` will be used.
+For example, for the URL `https://github.com/silversquirl/zig-uuid.git`, the name `uuid` will be used.
