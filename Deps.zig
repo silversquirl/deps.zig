@@ -26,6 +26,7 @@
 // - Fetch packages at build time
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 update_step: std.build.Step,
 
@@ -60,7 +61,7 @@ pub fn init(b: *std.build.Builder) *Deps {
     return self;
 }
 pub fn initNoStep(b: *std.build.Builder) *Deps {
-    const dir = std.os.getenv("DEPS_ZIG_CACHE") orelse switch (std.builtin.os.tag) {
+    const dir = std.os.getenv("DEPS_ZIG_CACHE") orelse switch (builtin.os.tag) {
         .windows => b.fmt("{s}\\Temp\\deps-zig", .{std.os.getenv("LOCALAPPDATA").?}),
         .macos => b.fmt("{s}/Library/Caches/deps-zig", .{std.os.getenv("HOME").?}),
         else => if (std.os.getenv("XDG_CACHE_HOME")) |cache|
